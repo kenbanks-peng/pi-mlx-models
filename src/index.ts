@@ -63,9 +63,30 @@ function resolveModel(input?: string): { modelId: string; preset?: ModelPreset }
     return { modelId: preset?.modelId ?? DEFAULT_MODEL, preset };
   }
 
+  if (/^\d+$/.test(normalized)) {
+    const idx = Number(normalized) - 1;
+    if (idx >= 0 && idx < MODEL_PRESETS.length) {
+      const preset = MODEL_PRESETS[idx];
+      return { modelId: preset.modelId, preset };
+    }
+  }
+
   const preset = MODEL_PRESETS.find((p) => p.key === normalized || p.modelId === normalized);
   if (preset) return { modelId: preset.modelId, preset };
   return { modelId: normalized };
+}
+
+function presetPickerLines() {
+  const lines = ["Pick a model preset", ""];
+  MODEL_PRESETS.forEach((p, i) => {
+    lines.push(`${i + 1}. ${p.key}`);
+    lines.push(`   ${p.modelId}`);
+    lines.push(`   tags: ${p.tags.join(", ")}`);
+  });
+  lines.push("");
+  lines.push("Start by number: /mlx-start 1");
+  lines.push("Start by key: /mlx-start qwen3_4b");
+  return lines;
 }
 
 type StepState = {
@@ -348,6 +369,7 @@ export default async function (pi: ExtensionAPI) {
     description: "Initialize local MLX runtime (python venv + mlx-lm)",
     handler: async (_args, ctx) => {
       ctx.ui.setWidget("mlx-presets", undefined);
+      ctx.ui.setWidget("mlx-preset-picker", undefined);
       const progress = makeProgressController(ctx, "mlx-progress", "MLX init progress", [
         "Find compatible Python",
         "Create virtual environment",
@@ -367,9 +389,17 @@ export default async function (pi: ExtensionAPI) {
   });
 
   pi.registerCommand("mlx-start", {
-    description: "Start local MLX server. Usage: /mlx-start [preset-key|hf-model-id]",
+    description: "Start local MLX server. Usage: /mlx-start [preset-number|preset-key|hf-model-id]",
     handler: async (args, ctx) => {
+      const normalizedArgs = (args || "").trim();
+      if (!normalizedArgs) {
+        ctx.ui.setWidget("mlx-preset-picker", presetPickerLines(), { placement: "belowEditor" });
+        ctx.ui.notify("Pick a preset: /mlx-start <number|preset-key>", "info");
+        return;
+      }
+
       ctx.ui.setWidget("mlx-presets", undefined);
+      ctx.ui.setWidget("mlx-preset-picker", undefined);
       const selected = resolveModel(args);
       const model = selected.modelId;
       currentModel = model;
@@ -457,6 +487,7 @@ export default async function (pi: ExtensionAPI) {
         stopSpinner();
         ctx.ui.setStatus(PROVIDER_ID, `mlx: running (${model})`);
         ctx.ui.setWidget("mlx-progress", undefined);
+        ctx.ui.setWidget("mlx-preset-picker", undefined);
         ctx.ui.notify("MLX server is ready for prompts. Use /model and pick pi-mlx-models/...", "success");
       } catch (e) {
         stopSpinner();
@@ -477,16 +508,17 @@ export default async function (pi: ExtensionAPI) {
       ctx.ui.setStatus(PROVIDER_ID, "mlx: stopped");
       ctx.ui.setWidget("mlx-progress", undefined);
       ctx.ui.setWidget("mlx-presets", undefined);
+      ctx.ui.setWidget("mlx-preset-picker", undefined);
       await registerProvider(pi, { includeFallback: false });
       ctx.ui.notify("MLX server stopped.", "info");
     },
   });
 
   pi.registerCommand("mlx-presets", {
-    description: "List built-in model presets",
+    description: "Show built-in model preset picker",
     handler: async (_args, ctx) => {
-      const summary = MODEL_PRESETS.map((p) => `${p.key} → ${p.modelId} [${p.tags.join(", ")}]`).join("\n");
-      ctx.ui.notify(`Presets:\n${summary}\n\nTip: /mlx-start <preset-key> (example: /mlx-start qwen3_4b)`, "info");
+      ctx.ui.setWidget("mlx-preset-picker", presetPickerLines(), { placement: "belowEditor" });
+      ctx.ui.notify("Pick a preset: /mlx-start <number|preset-key>", "info");
     },
   });
 

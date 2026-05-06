@@ -16,8 +16,8 @@ npm run build
 ## Commands
 
 - `/mlx-init`
-- `/mlx-start [preset-key|hf-model-id]`
-- `/mlx-presets`
+- `/mlx-start [preset-number|preset-key|hf-model-id]`
+- `/mlx-presets` (opens picker)
 - `/mlx-stop`
 - `/mlx-models`
 
