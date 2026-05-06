@@ -39,18 +39,16 @@ pi install git:github.com/vmarinogg/pi-mlx-models
 
 When `/mlx-start` is used with no args, a selector opens and you can pick a preset with arrow keys + Enter.
 
-You can also start directly by key, index, or full model id:
+You can also start directly with a full model id:
 
 ```bash
-/mlx-start qwen3_4b
-/mlx-start 4
 /mlx-start mlx-community/Qwen3-4B-Instruct-2507-4bit
 ```
 
 ## Commands
 
 - `/mlx-init` — initialize local MLX runtime
-- `/mlx-start [preset-number|preset-key|hf-model-id]` — start server and register provider
+- `/mlx-start [hf-model-id]` — open selector (no args) or start with full model id
 - `/mlx-stop` — stop server and clear active provider models
 
 ## Included presets
