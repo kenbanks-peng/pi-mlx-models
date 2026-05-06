@@ -12,6 +12,36 @@ const DEFAULT_MODEL =
 
 const PROVIDER_ID = "pi-mlx-models";
 const DATA_DIR = join(homedir(), ".pi", "agent", "pi-mlx-models");
+
+const MODEL_PRESETS = [
+  {
+    key: "deepseek_r1_1_5b",
+    modelId: "mlx-community/DeepSeek-R1-Distill-Qwen-1.5B-4bit",
+    tags: ["reasoning", "math", "debugging", "planning"],
+  },
+  {
+    key: "gemma4_e2b",
+    modelId: "mlx-community/gemma-4-e2b-it-4bit",
+    tags: ["writing", "summarization", "brainstorming", "general"],
+  },
+  {
+    key: "llama3_2_3b",
+    modelId: "mlx-community/Llama-3.2-3B-Instruct-4bit",
+    tags: ["chat", "rewriting", "summarization", "light-coding"],
+  },
+  {
+    key: "qwen3_4b",
+    modelId: "mlx-community/Qwen3-4B-Instruct-2507-4bit",
+    tags: ["coding", "reasoning", "structured-output", "general"],
+  },
+  {
+    key: "smollm3_3b",
+    modelId: "mlx-community/SmolLM3-3B-4bit",
+    tags: ["fast-chat", "quick-drafts", "classification", "extraction"],
+  },
+] as const;
+
+type ModelPreset = (typeof MODEL_PRESETS)[number];
 const VENV_DIR = join(DATA_DIR, "venv");
 const VENV_PYTHON = join(VENV_DIR, "bin", "python3");
 const HF_HOME = join(DATA_DIR, "models");
@@ -25,6 +55,18 @@ let statusLabel = "";
 let statusProgress: number | undefined;
 let statusStartedAt: number | null = null;
 let statusShowElapsed = false;
+
+function resolveModel(input?: string): { modelId: string; preset?: ModelPreset } {
+  const normalized = (input || "").trim();
+  if (!normalized) {
+    const preset = MODEL_PRESETS.find((p) => p.modelId === DEFAULT_MODEL || p.key === DEFAULT_MODEL);
+    return { modelId: preset?.modelId ?? DEFAULT_MODEL, preset };
+  }
+
+  const preset = MODEL_PRESETS.find((p) => p.key === normalized || p.modelId === normalized);
+  if (preset) return { modelId: preset.modelId, preset };
+  return { modelId: normalized };
+}
 
 type StepState = {
   label: string;
@@ -302,8 +344,8 @@ export default async function (pi: ExtensionAPI) {
     renderStatusBar();
   }
 
-  pi.registerCommand("mlx-setup", {
-    description: "Install local MLX runtime (python venv + mlx-lm)",
+  pi.registerCommand("mlx-init", {
+    description: "Initialize local MLX runtime (python venv + mlx-lm)",
     handler: async (_args, ctx) => {
       const progress = makeProgressController(ctx, "mlx-progress", "MLX setup progress", [
         "Find compatible Python",
@@ -317,15 +359,16 @@ export default async function (pi: ExtensionAPI) {
         ctx.ui.notify("MLX runtime installed.", "success");
       } catch (e) {
         progress.errorStep(3, e instanceof Error ? e.message : String(e));
-        ctx.ui.notify(`mlx-setup failed: ${e instanceof Error ? e.message : String(e)}`, "error");
+        ctx.ui.notify(`mlx-init failed: ${e instanceof Error ? e.message : String(e)}`, "error");
       }
     },
   });
 
   pi.registerCommand("mlx-start", {
-    description: "Start local MLX server. Usage: /mlx-start [hf-model-id]",
+    description: "Start local MLX server. Usage: /mlx-start [preset-key|hf-model-id]",
     handler: async (args, ctx) => {
-      const model = (args || "").trim() || DEFAULT_MODEL;
+      const selected = resolveModel(args);
+      const model = selected.modelId;
       currentModel = model;
       await registerProvider(pi, { includeFallback: false });
 
@@ -349,7 +392,10 @@ export default async function (pi: ExtensionAPI) {
           await new Promise((r) => setTimeout(r, 800));
         }
 
-        ctx.ui.notify(`Starting MLX server with ${model}...`, "info");
+        ctx.ui.notify(
+          `Starting MLX server with ${model}${selected.preset ? ` (preset: ${selected.preset.key})` : ""}...`,
+          "info",
+        );
         startSpinner(ctx, `Start MLX server process (${model})`);
         progress.activateStep(1, "Launching mlx_lm.server");
 
@@ -428,6 +474,20 @@ export default async function (pi: ExtensionAPI) {
       ctx.ui.setWidget("mlx-progress", undefined);
       await registerProvider(pi, { includeFallback: false });
       ctx.ui.notify("MLX server stopped.", "info");
+    },
+  });
+
+  pi.registerCommand("mlx-presets", {
+    description: "List built-in model presets",
+    handler: async (_args, ctx) => {
+      const lines = ["pi-mlx-models presets", ""];
+      for (const p of MODEL_PRESETS) {
+        lines.push(`• ${p.key}`);
+        lines.push(`  ${p.modelId}`);
+        lines.push(`  tags: ${p.tags.join(", ")}`);
+      }
+      ctx.ui.setWidget("mlx-presets", lines, { placement: "belowEditor" });
+      ctx.ui.notify("Tip: /mlx-start <preset-key> (example: /mlx-start qwen3_4b)", "info");
     },
   });
 
