@@ -4,11 +4,10 @@ import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { homedir } from "node:os";
 
-const PORT = Number(process.env.PI_MLX_MODELS_PORT ?? process.env.GEMMA_PORT ?? 11434);
-const HOST = process.env.PI_MLX_MODELS_HOST ?? process.env.GEMMA_HOST ?? "127.0.0.1";
-const BASE_URL = process.env.PI_MLX_MODELS_BASE_URL ?? process.env.GEMMA_BASE_URL ?? `http://${HOST}:${PORT}/v1`;
-const DEFAULT_MODEL =
-  process.env.PI_MLX_MODELS_DEFAULT_MODEL ?? process.env.GEMMA_DEFAULT_MODEL ?? "mlx-community/gemma-4-e2b-it-4bit";
+const PORT = Number(process.env.PI_MLX_MODELS_PORT ?? 11434);
+const HOST = process.env.PI_MLX_MODELS_HOST ?? "127.0.0.1";
+const BASE_URL = process.env.PI_MLX_MODELS_BASE_URL ?? `http://${HOST}:${PORT}/v1`;
+const DEFAULT_MODEL = process.env.PI_MLX_MODELS_DEFAULT_MODEL ?? "mlx-community/Qwen3-4B-Instruct-2507-4bit";
 
 const PROVIDER_ID = "pi-mlx-models";
 const DATA_DIR = join(homedir(), ".pi", "agent", "pi-mlx-models");

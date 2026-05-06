@@ -75,9 +75,7 @@ Environment variables supported by the extension:
 - `PI_MLX_MODELS_PORT` (default: `11434`)
 - `PI_MLX_MODELS_HOST` (default: `127.0.0.1`)
 - `PI_MLX_MODELS_BASE_URL` (default: `http://<host>:<port>/v1`)
-- `PI_MLX_MODELS_DEFAULT_MODEL` (default: `mlx-community/gemma-4-e2b-it-4bit`)
-
-Legacy `GEMMA_*` vars are also respected for compatibility.
+- `PI_MLX_MODELS_DEFAULT_MODEL` (default: `mlx-community/Qwen3-4B-Instruct-2507-4bit`)
 
 ## Local data paths
 
