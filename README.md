@@ -2,9 +2,17 @@
 
 Local MLX model launcher extension for Pi.
 
-## Status
+## Development
 
-Scaffold in progress.
+```bash
+npm install
+npm run build
+```
+
+## Entry point
+
+- `src/index.ts`
+- Example command: `/mlx-models-help`
 
 ## License
 
