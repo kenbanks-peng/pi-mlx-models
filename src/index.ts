@@ -83,8 +83,105 @@ function presetPickerLines() {
   });
   lines.push("");
   lines.push("Use: /mlx-start <number|preset-key>");
-  lines.push("Example: /mlx-start 4");
+  lines.push("Or type: /mlx-start-<preset-key>");
   return lines;
+}
+
+async function startModelFromInput(pi: ExtensionAPI, ctx: any, args?: string) {
+  const selected = resolveModel(args);
+  const model = selected.modelId;
+  currentModel = model;
+  await registerProvider(pi, { includeFallback: false });
+
+  const progress = makeProgressController(ctx, "mlx-progress", `MLX start progress (${model})`, [
+    "Ensure runtime is installed",
+    "Start MLX server process",
+    "Wait for server health endpoint",
+    "Download/load model",
+    "Warm up first inference",
+    "Register provider models",
+  ]);
+
+  try {
+    progress.activateStep(0, "Checking runtime");
+    await ensureSetup();
+    progress.doneStep(0, "Runtime ready");
+
+    if (serverProc && !serverProc.killed) {
+      serverProc.kill("SIGTERM");
+      serverProc = null;
+      await new Promise((r) => setTimeout(r, 800));
+    }
+
+    ctx.ui.notify(
+      `Starting MLX server with ${model}${selected.preset ? ` (preset: ${selected.preset.key})` : ""}...`,
+      "info",
+    );
+    startSpinner(ctx, `Start MLX server process (${model})`);
+    progress.activateStep(1, "Launching mlx_lm.server");
+
+    serverProc = spawn(VENV_PYTHON, ["-m", "mlx_lm.server", "--model", model, "--host", HOST, "--port", String(PORT)], {
+      env: { ...process.env, HF_HOME, TRANSFORMERS_CACHE: HF_HOME, HF_HUB_DISABLE_TELEMETRY: "1" },
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+
+    progress.doneStep(1, "Server process started");
+    progress.activateStep(2, "Probing /v1/models");
+    startSpinner(ctx, "Wait for server health endpoint");
+
+    serverProc.stderr?.on("data", (d) => {
+      const text = d.toString();
+      const fetchMatch = text.match(/Fetching\s+(\d+)\s+files?:\s+(\d+)%.*?(\d+)\/(\d+)/);
+      if (fetchMatch) {
+        const pct = Number(fetchMatch[2]) / 100;
+        const done = fetchMatch[3];
+        const total = fetchMatch[4];
+        progress.setStep(3, { state: "active", detail: `Downloading model files (${done}/${total})`, progress: pct });
+        startSpinner(ctx, `Download/load model (${done}/${total} files)`, pct);
+        return;
+      }
+      if (text.includes("Fetching") || text.includes("Downloading")) {
+        progress.setStep(3, { state: "active", detail: "Downloading model files..." });
+        startSpinner(ctx, "Download/load model");
+        return;
+      }
+      if (text.toLowerCase().includes("starting") || text.includes("httpd")) {
+        startSpinner(ctx, `Start MLX server process (${model})`);
+      }
+    });
+
+    serverProc.on("exit", () => {
+      stopSpinner();
+      serverProc = null;
+      ctx.ui.setStatus(PROVIDER_ID, "mlx: stopped");
+    });
+
+    await waitForServer();
+    progress.doneStep(2, "Server responded on /v1/models");
+
+    progress.activateStep(3, "Loading model (first run may download GBs)");
+    startSpinner(ctx, "Download/load model");
+
+    progress.activateStep(4, "Running first lightweight completion");
+    startSpinner(ctx, "Warm up first inference", undefined, true);
+    await waitForInferenceReady(model);
+    progress.doneStep(4, "Model is inference-ready");
+    progress.doneStep(3, "Model loaded");
+
+    progress.activateStep(5, "Refreshing provider model list");
+    await registerProvider(pi, { includeFallback: true });
+    progress.doneStep(5, "Provider ready");
+
+    stopSpinner();
+    ctx.ui.setStatus(PROVIDER_ID, `mlx: running (${model})`);
+    ctx.ui.setWidget("mlx-progress", undefined);
+    ctx.ui.setWidget("mlx-preset-picker", undefined);
+    ctx.ui.notify("MLX server is ready for prompts. Use /model and pick pi-mlx-models/...", "success");
+  } catch (e) {
+    stopSpinner();
+    progress.errorStep(4, e instanceof Error ? e.message : String(e));
+    ctx.ui.notify(`mlx-start failed: ${e instanceof Error ? e.message : String(e)}`, "error");
+  }
 }
 
 type StepState = {
@@ -398,102 +495,20 @@ export default async function (pi: ExtensionAPI) {
 
       ctx.ui.setWidget("mlx-presets", undefined);
       ctx.ui.setWidget("mlx-preset-picker", undefined);
-      const selected = resolveModel(args);
-      const model = selected.modelId;
-      currentModel = model;
-      await registerProvider(pi, { includeFallback: false });
-
-      const progress = makeProgressController(ctx, "mlx-progress", `MLX start progress (${model})`, [
-        "Ensure runtime is installed",
-        "Start MLX server process",
-        "Wait for server health endpoint",
-        "Download/load model",
-        "Warm up first inference",
-        "Register provider models",
-      ]);
-
-      try {
-        progress.activateStep(0, "Checking runtime");
-        await ensureSetup();
-        progress.doneStep(0, "Runtime ready");
-
-        if (serverProc && !serverProc.killed) {
-          serverProc.kill("SIGTERM");
-          serverProc = null;
-          await new Promise((r) => setTimeout(r, 800));
-        }
-
-        ctx.ui.notify(
-          `Starting MLX server with ${model}${selected.preset ? ` (preset: ${selected.preset.key})` : ""}...`,
-          "info",
-        );
-        startSpinner(ctx, `Start MLX server process (${model})`);
-        progress.activateStep(1, "Launching mlx_lm.server");
-
-        serverProc = spawn(VENV_PYTHON, ["-m", "mlx_lm.server", "--model", model, "--host", HOST, "--port", String(PORT)], {
-          env: { ...process.env, HF_HOME, TRANSFORMERS_CACHE: HF_HOME, HF_HUB_DISABLE_TELEMETRY: "1" },
-          stdio: ["ignore", "pipe", "pipe"],
-        });
-
-        progress.doneStep(1, "Server process started");
-        progress.activateStep(2, "Probing /v1/models");
-        startSpinner(ctx, "Wait for server health endpoint");
-
-        serverProc.stderr?.on("data", (d) => {
-          const text = d.toString();
-          const fetchMatch = text.match(/Fetching\s+(\d+)\s+files?:\s+(\d+)%.*?(\d+)\/(\d+)/);
-          if (fetchMatch) {
-            const pct = Number(fetchMatch[2]) / 100;
-            const done = fetchMatch[3];
-            const total = fetchMatch[4];
-            progress.setStep(3, { state: "active", detail: `Downloading model files (${done}/${total})`, progress: pct });
-            startSpinner(ctx, `Download/load model (${done}/${total} files)`, pct);
-            return;
-          }
-          if (text.includes("Fetching") || text.includes("Downloading")) {
-            progress.setStep(3, { state: "active", detail: "Downloading model files..." });
-            startSpinner(ctx, "Download/load model");
-            return;
-          }
-          if (text.toLowerCase().includes("starting") || text.includes("httpd")) {
-            startSpinner(ctx, `Start MLX server process (${model})`);
-          }
-        });
-
-        serverProc.on("exit", () => {
-          stopSpinner();
-          serverProc = null;
-          ctx.ui.setStatus(PROVIDER_ID, "mlx: stopped");
-        });
-
-        await waitForServer();
-        progress.doneStep(2, "Server responded on /v1/models");
-
-        progress.activateStep(3, "Loading model (first run may download GBs)");
-        startSpinner(ctx, "Download/load model");
-
-        progress.activateStep(4, "Running first lightweight completion");
-        startSpinner(ctx, "Warm up first inference", undefined, true);
-        await waitForInferenceReady(model);
-        progress.doneStep(4, "Model is inference-ready");
-        progress.doneStep(3, "Model loaded");
-
-        progress.activateStep(5, "Refreshing provider model list");
-        await registerProvider(pi, { includeFallback: true });
-        progress.doneStep(5, "Provider ready");
-
-        stopSpinner();
-        ctx.ui.setStatus(PROVIDER_ID, `mlx: running (${model})`);
-        ctx.ui.setWidget("mlx-progress", undefined);
-        ctx.ui.setWidget("mlx-preset-picker", undefined);
-        ctx.ui.notify("MLX server is ready for prompts. Use /model and pick pi-mlx-models/...", "success");
-      } catch (e) {
-        stopSpinner();
-        progress.errorStep(4, e instanceof Error ? e.message : String(e));
-        ctx.ui.notify(`mlx-start failed: ${e instanceof Error ? e.message : String(e)}`, "error");
-      }
+      await startModelFromInput(pi, ctx, normalizedArgs);
     },
   });
+
+  for (const preset of MODEL_PRESETS) {
+    pi.registerCommand(`mlx-start-${preset.key}`, {
+      description: `Start preset ${preset.key} (${preset.tags.slice(0, 2).join(", ")})`,
+      handler: async (_args, ctx) => {
+        ctx.ui.setWidget("mlx-presets", undefined);
+        ctx.ui.setWidget("mlx-preset-picker", undefined);
+        await startModelFromInput(pi, ctx, preset.key);
+      },
+    });
+  }
 
   pi.registerCommand("mlx-stop", {
     description: "Stop local MLX server",
