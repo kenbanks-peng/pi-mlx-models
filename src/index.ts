@@ -76,15 +76,13 @@ function resolveModel(input?: string): { modelId: string; preset?: ModelPreset }
   return { modelId: normalized };
 }
 
-function presetPickerLines() {
-  const lines = ["Pick a model preset", ""];
-  MODEL_PRESETS.forEach((p, i) => {
-    lines.push(`${i + 1}. ${p.key} — ${p.tags.slice(0, 2).join(", ")}`);
-  });
-  lines.push("");
-  lines.push("Use: /mlx-start <number|preset-key>");
-  lines.push("Or type: /mlx-start-<preset-key>");
-  return lines;
+async function pickPreset(ctx: any): Promise<ModelPreset | undefined> {
+  const options = MODEL_PRESETS.map((p, i) => `${i + 1}. ${p.key} — ${p.tags.slice(0, 2).join(", ")}`);
+  const selected = await ctx.ui.select("Select MLX model preset", options);
+  if (!selected) return undefined;
+  const idx = options.indexOf(selected);
+  if (idx < 0) return undefined;
+  return MODEL_PRESETS[idx];
 }
 
 async function startModelFromInput(pi: ExtensionAPI, ctx: any, args?: string) {
@@ -488,8 +486,12 @@ export default async function (pi: ExtensionAPI) {
     handler: async (args, ctx) => {
       const normalizedArgs = (args || "").trim();
       if (!normalizedArgs) {
-        ctx.ui.setWidget("mlx-preset-picker", presetPickerLines(), { placement: "belowEditor" });
-        ctx.ui.notify("Pick a preset: /mlx-start <number|preset-key>", "info");
+        const preset = await pickPreset(ctx);
+        if (!preset) {
+          ctx.ui.notify("Preset selection cancelled.", "info");
+          return;
+        }
+        await startModelFromInput(pi, ctx, preset.key);
         return;
       }
 
@@ -528,10 +530,14 @@ export default async function (pi: ExtensionAPI) {
   });
 
   pi.registerCommand("mlx-presets", {
-    description: "Show built-in model preset picker",
+    description: "Open built-in model preset selector",
     handler: async (_args, ctx) => {
-      ctx.ui.setWidget("mlx-preset-picker", presetPickerLines(), { placement: "belowEditor" });
-      ctx.ui.notify("Pick a preset: /mlx-start <number|preset-key>", "info");
+      const preset = await pickPreset(ctx);
+      if (!preset) {
+        ctx.ui.notify("Preset selection cancelled.", "info");
+        return;
+      }
+      await startModelFromInput(pi, ctx, preset.key);
     },
   });
 
