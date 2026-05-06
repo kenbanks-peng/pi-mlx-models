@@ -1,46 +1,92 @@
 # pi-mlx-models
 
-Local MLX models for Pi (Apple Silicon).
+Local MLX model launcher for [Pi](https://pi.dev) on Apple Silicon.
 
-## Features
+<p align="center">
+  <img src="./assets/preset-selector.png" alt="Preset selector" width="780" />
+</p>
 
-- `/mlx-init` — installs runtime (`python venv` + `mlx-lm`)
-- `/mlx-start` — opens interactive preset selector (or accepts model id)
-- `/mlx-stop` — stops local MLX server
-- Single-stage startup progress UI with live warm-up timer
-- Hides models until the server is actually ready
+`pi-mlx-models` adds a local OpenAI-compatible provider to Pi, with a guided startup flow for MLX models.
+
+## What you get
+
+- Interactive preset selector via `/mlx-start`
+- Local runtime bootstrap via `/mlx-init` (venv + `mlx-lm`)
+- Startup progress with stage/status updates and warm-up timer
+- Provider models only appear when the server is actually ready
+- Stop/cleanup command via `/mlx-stop`
 
 ## Install
+
+### From npm
 
 ```bash
 pi install npm:pi-mlx-models
 ```
 
-Or from GitHub:
+### From GitHub
 
 ```bash
 pi install git:github.com/vmarinogg/pi-mlx-models
 ```
 
-## Usage
+## Quick start
 
 ```bash
 /mlx-init
 /mlx-start
 ```
 
-`/mlx-start` with no args opens a selector.
-You can also pass a value directly:
+When `/mlx-start` is used with no args, a selector opens and you can pick a preset with arrow keys + Enter.
+
+You can also start directly by key, index, or full model id:
 
 ```bash
 /mlx-start qwen3_4b
+/mlx-start 4
 /mlx-start mlx-community/Qwen3-4B-Instruct-2507-4bit
 ```
+
+## Commands
+
+- `/mlx-init` — initialize local MLX runtime
+- `/mlx-start [preset-number|preset-key|hf-model-id]` — start server and register provider
+- `/mlx-stop` — stop server and clear active provider models
+
+## Included presets
+
+- `deepseek_r1_1_5b` — reasoning, math
+- `gemma4_e2b` — writing, summarization
+- `llama3_2_3b` — chat, rewriting
+- `qwen3_4b` — coding, reasoning
+- `smollm3_3b` — fast chat, quick drafts
+
+> [!TIP]
+> Want to try other models? Browse MLX Community collections on Hugging Face:  
+> https://huggingface.co/mlx-community/collections
 
 ## Requirements
 
 - macOS on Apple Silicon
 - Python 3.10–3.13
+
+## Configuration
+
+Environment variables supported by the extension:
+
+- `PI_MLX_MODELS_PORT` (default: `11434`)
+- `PI_MLX_MODELS_HOST` (default: `127.0.0.1`)
+- `PI_MLX_MODELS_BASE_URL` (default: `http://<host>:<port>/v1`)
+- `PI_MLX_MODELS_DEFAULT_MODEL` (default: `mlx-community/gemma-4-e2b-it-4bit`)
+
+Legacy `GEMMA_*` vars are also respected for compatibility.
+
+## Local data paths
+
+Runtime artifacts are stored under:
+
+- `~/.pi/agent/pi-mlx-models/venv`
+- `~/.pi/agent/pi-mlx-models/models`
 
 ## Development
 
@@ -49,28 +95,20 @@ npm install
 npm run build
 ```
 
-Pi package manifest is defined in `package.json`:
+Pi package manifest is in `package.json`:
 
 - `pi.extensions: ["dist/index.js"]`
 
 ## Screenshots
 
-### Preset selector
-
-![Preset selector](./assets/preset-selector.png)
-
 ### Startup progress
 
 ![Startup progress](./assets/start-progress.png)
 
-### Commands
+### Command menu
 
 ![Commands](./assets/commands.png)
 
 ### Model selection
 
 ![Model selection](./assets/model-selection.png)
-
-## License
-
-MIT
