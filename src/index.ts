@@ -79,13 +79,11 @@ function resolveModel(input?: string): { modelId: string; preset?: ModelPreset }
 function presetPickerLines() {
   const lines = ["Pick a model preset", ""];
   MODEL_PRESETS.forEach((p, i) => {
-    lines.push(`${i + 1}. ${p.key}`);
-    lines.push(`   ${p.modelId}`);
-    lines.push(`   tags: ${p.tags.join(", ")}`);
+    lines.push(`${i + 1}. ${p.key} — ${p.tags.slice(0, 2).join(", ")}`);
   });
   lines.push("");
-  lines.push("Start by number: /mlx-start 1");
-  lines.push("Start by key: /mlx-start qwen3_4b");
+  lines.push("Use: /mlx-start <number|preset-key>");
+  lines.push("Example: /mlx-start 4");
   return lines;
 }
 
