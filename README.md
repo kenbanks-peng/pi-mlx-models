@@ -12,7 +12,13 @@ npm run build
 ## Entry point
 
 - `src/index.ts`
-- Example command: `/mlx-models-help`
+
+## Commands
+
+- `/mlx-setup`
+- `/mlx-start [hf-model-id]`
+- `/mlx-stop`
+- `/mlx-models`
 
 ## License
 
