@@ -495,7 +495,10 @@ async function registerProvider(pi: ExtensionAPI, options?: { includeFallback?: 
   pi.registerProvider(PROVIDER_ID, {
     name: "PI MLX Models",
     baseUrl: BASE_URL,
-    apiKey: "$DUMMY",
+    // Use a literal placeholder. Values beginning with "$" are resolved as
+    // environment variables by Pi; "$DUMMY" is usually unset, which makes the
+    // provider look unauthenticated and hides its models from /model.
+    apiKey: "dummy",
     api: "openai-completions",
     models: asProviderModels(modelIds),
   });
