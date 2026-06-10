@@ -1,6 +1,6 @@
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import { spawn, spawnSync, type ChildProcess } from "node:child_process";
-import { existsSync } from "node:fs";
+import { existsSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { homedir } from "node:os";
 
@@ -321,17 +321,39 @@ function makeProgressController(ctx: any, id: string, title: string, labels: str
   return { setStep, activateStep, doneStep, errorStep };
 }
 
+function discoverVersionedPythonCandidates(): string[] {
+  const dirs = ["/opt/homebrew/bin", "/usr/local/bin", "/usr/bin"];
+  const found: Array<{ path: string; minor: number }> = [];
+
+  for (const dir of dirs) {
+    try {
+      for (const name of readdirSync(dir)) {
+        const m = name.match(/^python3\.(\d+)$/);
+        if (m) found.push({ path: join(dir, name), minor: Number(m[1]) });
+      }
+    } catch {
+      // ignore unreadable/nonexistent locations
+    }
+  }
+
+  return found.sort((a, b) => b.minor - a.minor).map((p) => p.path);
+}
+
 function findPython(): string | null {
   const candidates = [
-    "/opt/homebrew/bin/python3.13",
-    "/opt/homebrew/bin/python3.12",
-    "/opt/homebrew/bin/python3.11",
-    "/opt/homebrew/bin/python3.10",
+    process.env.PI_MLX_MODELS_PYTHON?.trim(),
+    "python3",
+    "python",
+    ...discoverVersionedPythonCandidates(),
     "/opt/homebrew/bin/python3",
     "/usr/local/bin/python3",
     "/usr/bin/python3",
-  ];
+  ].filter((candidate): candidate is string => Boolean(candidate));
+  const seen = new Set<string>();
+
   for (const c of candidates) {
+    if (seen.has(c)) continue;
+    seen.add(c);
     try {
       const s = spawnSync(c, ["--version"], { stdio: ["ignore", "pipe", "pipe"], timeout: 3000 });
       if (s.status !== 0) continue;
@@ -339,7 +361,7 @@ function findPython(): string | null {
       const m = out.match(/Python\s+3\.(\d+)/);
       if (!m) continue;
       const minor = Number(m[1]);
-      if (minor >= 10 && minor <= 13) return c;
+      if (minor >= 10) return c;
     } catch {
       // ignore
     }
@@ -374,7 +396,7 @@ function run(cmd: string, args: string[], env?: Record<string, string>, onLine?:
 
 async function ensureSetup(progress?: ReturnType<typeof makeProgressController>) {
   const py = findPython();
-  if (!py) throw new Error("Python 3.10–3.13 not found. Install: brew install python@3.13");
+  if (!py) throw new Error("Python 3.10 or newer not found. Install with Homebrew (brew install python) or set PI_MLX_MODELS_PYTHON");
 
   progress?.activateStep(0, `Using ${py}`);
   progress?.doneStep(0, "Compatible Python found");
@@ -473,7 +495,7 @@ async function registerProvider(pi: ExtensionAPI, options?: { includeFallback?: 
   pi.registerProvider(PROVIDER_ID, {
     name: "PI MLX Models",
     baseUrl: BASE_URL,
-    apiKey: "DUMMY",
+    apiKey: "$DUMMY",
     api: "openai-completions",
     models: asProviderModels(modelIds),
   });

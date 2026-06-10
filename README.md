@@ -68,7 +68,7 @@ Cached model repos that look MLX-compatible are shown (`mlx-community/*` or ids 
 ## Requirements
 
 - macOS on Apple Silicon
-- Python 3.10–3.13
+- Python 3.10 or newer
 
 ## Configuration
 
@@ -79,6 +79,7 @@ Environment variables supported by the extension:
 - `PI_MLX_MODELS_BASE_URL` (default: `http://<host>:<port>/v1`)
 - `PI_MLX_MODELS_DEFAULT_MODEL` (optional cached model id or generated cache key)
 - `PI_MLX_MODELS_HF_CLI` (optional path to the `hf` CLI)
+- `PI_MLX_MODELS_PYTHON` (optional path to a Python 3.10+ executable for `/mlx-init`)
 - `HF_HOME` (default: `~/.cache/huggingface`; Hugging Face stores repos under its `hub/` subdirectory)
 
 ## Local data paths
