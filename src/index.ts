@@ -7,43 +7,30 @@ import { homedir } from "node:os";
 const PORT = Number(process.env.PI_MLX_MODELS_PORT ?? 11434);
 const HOST = process.env.PI_MLX_MODELS_HOST ?? "127.0.0.1";
 const BASE_URL = process.env.PI_MLX_MODELS_BASE_URL ?? `http://${HOST}:${PORT}/v1`;
-const DEFAULT_MODEL = process.env.PI_MLX_MODELS_DEFAULT_MODEL ?? "mlx-community/Qwen3-4B-Instruct-2507-4bit";
+const DEFAULT_MODEL = process.env.PI_MLX_MODELS_DEFAULT_MODEL?.trim() || "";
 
 const PROVIDER_ID = "pi-mlx-models";
 const DATA_DIR = join(homedir(), ".pi", "agent", "pi-mlx-models");
-
-const MODEL_PRESETS = [
-  {
-    key: "deepseek_r1_1_5b",
-    modelId: "mlx-community/DeepSeek-R1-Distill-Qwen-1.5B-4bit",
-    tags: ["reasoning", "math", "debugging", "planning"],
-  },
-  {
-    key: "gemma4_e2b",
-    modelId: "mlx-community/gemma-4-e2b-it-4bit",
-    tags: ["writing", "summarization", "brainstorming", "general"],
-  },
-  {
-    key: "llama3_2_3b",
-    modelId: "mlx-community/Llama-3.2-3B-Instruct-4bit",
-    tags: ["chat", "rewriting", "summarization", "light-coding"],
-  },
-  {
-    key: "qwen3_4b",
-    modelId: "mlx-community/Qwen3-4B-Instruct-2507-4bit",
-    tags: ["coding", "reasoning", "structured-output", "general"],
-  },
-  {
-    key: "smollm3_3b",
-    modelId: "mlx-community/SmolLM3-3B-4bit",
-    tags: ["fast-chat", "quick-drafts", "classification", "extraction"],
-  },
-] as const;
-
-type ModelPreset = (typeof MODEL_PRESETS)[number];
 const VENV_DIR = join(DATA_DIR, "venv");
 const VENV_PYTHON = join(VENV_DIR, "bin", "python3");
-const HF_HOME = join(DATA_DIR, "models");
+const VENV_HF = join(VENV_DIR, "bin", "hf");
+const VENV_HUGGINGFACE_CLI = join(VENV_DIR, "bin", "huggingface-cli");
+const HF_HOME = process.env.HF_HOME?.trim() || join(homedir(), ".cache", "huggingface");
+
+type CachedModel = {
+  key: string;
+  modelId: string;
+  size?: string;
+  lastAccessed?: string;
+};
+
+type HfCacheEntry = {
+  repo_id?: unknown;
+  repo_type?: unknown;
+  id?: unknown;
+  size?: unknown;
+  last_accessed?: unknown;
+};
 
 let serverProc: ChildProcess | null = null;
 let currentModel = DEFAULT_MODEL;
@@ -55,33 +42,106 @@ let statusProgress: number | undefined;
 let statusStartedAt: number | null = null;
 let statusShowElapsed = false;
 
-function resolveModel(input?: string): { modelId: string; preset?: ModelPreset } {
+function keyForModel(modelId: string): string {
+  return modelId
+    .replace(/^mlx-community\//, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "");
+}
+
+function hfCacheEnv() {
+  return { ...process.env, HF_HOME, TRANSFORMERS_CACHE: HF_HOME, HF_HUB_DISABLE_TELEMETRY: "1" };
+}
+
+function hfCliCandidates(): string[] {
+  return [
+    process.env.PI_MLX_MODELS_HF_CLI,
+    existsSync(VENV_HF) ? VENV_HF : undefined,
+    "hf",
+    existsSync(VENV_HUGGINGFACE_CLI) ? VENV_HUGGINGFACE_CLI : undefined,
+    "huggingface-cli",
+  ].filter((candidate): candidate is string => Boolean(candidate));
+}
+
+function parseHfCacheModels(stdout: string): CachedModel[] {
+  const parsed = JSON.parse(stdout) as unknown;
+  const entries = Array.isArray(parsed) ? (parsed as HfCacheEntry[]) : [];
+  const seen = new Set<string>();
+  return entries
+    .filter((entry) => entry.repo_type === "model")
+    .map((entry) => ({
+      modelId: typeof entry.repo_id === "string" ? entry.repo_id : typeof entry.id === "string" ? entry.id.replace(/^model\//, "") : "",
+      size: typeof entry.size === "string" ? entry.size : undefined,
+      lastAccessed: typeof entry.last_accessed === "string" ? entry.last_accessed : undefined,
+    }))
+    .filter(
+      (entry) =>
+        entry.modelId &&
+        (entry.modelId.startsWith("mlx-community/") || /mlx/i.test(entry.modelId)) &&
+        !seen.has(entry.modelId) &&
+        seen.add(entry.modelId),
+    )
+    .map((entry) => ({ key: keyForModel(entry.modelId), ...entry }))
+    .sort((a, b) => a.modelId.localeCompare(b.modelId));
+}
+
+function listCachedModels(): CachedModel[] {
+  for (const command of hfCliCandidates()) {
+    const res = spawnSync(command, ["cache", "ls", "--format", "json"], {
+      env: hfCacheEnv(),
+      encoding: "utf8",
+    });
+    if (res.status !== 0 || !res.stdout.trim()) continue;
+    try {
+      return parseHfCacheModels(res.stdout);
+    } catch {
+      continue;
+    }
+  }
+  return [];
+}
+
+function resolveModel(input?: string): { modelId: string; cached?: CachedModel } {
   const normalized = (input || "").trim();
+  const cachedModels = listCachedModels();
   if (!normalized) {
-    const preset = MODEL_PRESETS.find((p) => p.modelId === DEFAULT_MODEL || p.key === DEFAULT_MODEL);
-    return { modelId: preset?.modelId ?? DEFAULT_MODEL, preset };
+    const cached = cachedModels.find((m) => m.modelId === DEFAULT_MODEL || m.key === DEFAULT_MODEL) ?? cachedModels[0];
+    return { modelId: cached?.modelId ?? DEFAULT_MODEL, cached };
   }
 
   if (/^\d+$/.test(normalized)) {
     const idx = Number(normalized) - 1;
-    if (idx >= 0 && idx < MODEL_PRESETS.length) {
-      const preset = MODEL_PRESETS[idx];
-      return { modelId: preset.modelId, preset };
+    if (idx >= 0 && idx < cachedModels.length) {
+      const cached = cachedModels[idx];
+      return { modelId: cached.modelId, cached };
     }
   }
 
-  const preset = MODEL_PRESETS.find((p) => p.key === normalized || p.modelId === normalized);
-  if (preset) return { modelId: preset.modelId, preset };
+  const cached = cachedModels.find((m) => m.key === normalized || m.modelId === normalized);
+  if (cached) return { modelId: cached.modelId, cached };
   return { modelId: normalized };
 }
 
-async function pickPreset(ctx: any): Promise<ModelPreset | undefined> {
-  const options = MODEL_PRESETS.map((p, i) => `${i + 1}. ${p.key} — ${p.tags.slice(0, 2).join(", ")}`);
-  const selected = await ctx.ui.select("Select MLX model preset", options);
+async function pickCachedModel(ctx: any): Promise<CachedModel | undefined> {
+  const cachedModels = listCachedModels();
+  if (!cachedModels.length) {
+    ctx.ui.notify(
+      `No cached MLX models found in ${HF_HOME}. Start with /mlx-start <hf-model-id> to download one first.`,
+      "warning",
+    );
+    return undefined;
+  }
+
+  const options = cachedModels.map((m, i) => {
+    const details = [m.size, m.lastAccessed ? `used ${m.lastAccessed}` : undefined].filter(Boolean).join(", ");
+    return `${i + 1}. ${m.modelId}${details ? ` — ${details}` : ""}`;
+  });
+  const selected = await ctx.ui.select("Select cached MLX model", options);
   if (!selected) return undefined;
   const idx = options.indexOf(selected);
   if (idx < 0) return undefined;
-  return MODEL_PRESETS[idx];
+  return cachedModels[idx];
 }
 
 async function startModelFromInput(
@@ -95,6 +155,10 @@ async function startModelFromInput(
 ) {
   const selected = resolveModel(args);
   const model = selected.modelId;
+  if (!model) {
+    ctx.ui.notify("No MLX model selected. Use /mlx-start <hf-model-id> or cache a model with Hugging Face first.", "error");
+    return;
+  }
   currentModel = model;
   await registerProvider(pi, { includeFallback: false });
 
@@ -119,14 +183,14 @@ async function startModelFromInput(
     }
 
     ctx.ui.notify(
-      `Starting MLX server with ${model}${selected.preset ? ` (preset: ${selected.preset.key})` : ""}...`,
+      `Starting MLX server with ${model}${selected.cached ? ` (cached: ${selected.cached.key})` : ""}...`,
       "info",
     );
     controls.startSpinner(ctx, `Start MLX server process (${model})`);
     progress.activateStep(1, "Launching mlx_lm.server");
 
     serverProc = spawn(VENV_PYTHON, ["-m", "mlx_lm.server", "--model", model, "--host", HOST, "--port", String(PORT)], {
-      env: { ...process.env, HF_HOME, TRANSFORMERS_CACHE: HF_HOME, HF_HUB_DISABLE_TELEMETRY: "1" },
+      env: hfCacheEnv(),
       stdio: ["ignore", "pipe", "pipe"],
     });
 
@@ -180,7 +244,7 @@ async function startModelFromInput(
     controls.stopSpinner();
     ctx.ui.setStatus(PROVIDER_ID, `mlx: running (${model})`);
     ctx.ui.setWidget("mlx-progress", undefined);
-    ctx.ui.setWidget("mlx-preset-picker", undefined);
+     ctx.ui.setWidget("mlx-model-picker", undefined);
     ctx.ui.notify("MLX server is ready for prompts. Use /model and pick pi-mlx-models/...", "info");
   } catch (e) {
     controls.stopSpinner();
@@ -404,7 +468,7 @@ function asProviderModels(ids: string[]) {
 async function registerProvider(pi: ExtensionAPI, options?: { includeFallback?: boolean }) {
   const discovered = await discoverModelIds();
   const includeFallback = options?.includeFallback ?? false;
-  const modelIds = discovered.length ? discovered : includeFallback ? [currentModel] : [];
+  const modelIds = discovered.length ? discovered : includeFallback && currentModel ? [currentModel] : [];
 
   pi.registerProvider(PROVIDER_ID, {
     name: "PI MLX Models",
@@ -468,7 +532,7 @@ export default async function (pi: ExtensionAPI) {
   pi.registerCommand("mlx-init", {
     description: "Initialize local MLX runtime (python venv + mlx-lm)",
     handler: async (_args, ctx) => {
-      ctx.ui.setWidget("mlx-preset-picker", undefined);
+      ctx.ui.setWidget("mlx-model-picker", undefined);
       const progress = makeProgressController(ctx, "mlx-progress", "MLX init progress", [
         "Find compatible Python",
         "Create virtual environment",
@@ -488,20 +552,21 @@ export default async function (pi: ExtensionAPI) {
   });
 
   pi.registerCommand("mlx-start", {
-    description: "Start local MLX server. Usage: /mlx-start [preset-number|preset-key|hf-model-id]",
+    description: "Start local MLX server. Usage: /mlx-start [cache-number|cache-key|hf-model-id]",
     handler: async (args, ctx) => {
       const normalizedArgs = (args || "").trim();
       if (!normalizedArgs) {
-        const preset = await pickPreset(ctx);
-        if (!preset) {
-          ctx.ui.notify("Preset selection cancelled.", "info");
+        await ensureSetup();
+        const cachedModel = await pickCachedModel(ctx);
+        if (!cachedModel) {
+          ctx.ui.notify("Model selection cancelled.", "info");
           return;
         }
-        await startModelFromInput(pi, ctx, preset.key, { startSpinner, stopSpinner });
+        await startModelFromInput(pi, ctx, cachedModel.key, { startSpinner, stopSpinner });
         return;
       }
 
-      ctx.ui.setWidget("mlx-preset-picker", undefined);
+      ctx.ui.setWidget("mlx-model-picker", undefined);
       await startModelFromInput(pi, ctx, normalizedArgs, { startSpinner, stopSpinner });
     },
   });
@@ -516,7 +581,7 @@ export default async function (pi: ExtensionAPI) {
       }
       ctx.ui.setStatus(PROVIDER_ID, "mlx: stopped");
       ctx.ui.setWidget("mlx-progress", undefined);
-      ctx.ui.setWidget("mlx-preset-picker", undefined);
+      ctx.ui.setWidget("mlx-model-picker", undefined);
       await registerProvider(pi, { includeFallback: false });
       ctx.ui.notify("MLX server stopped.", "info");
     },

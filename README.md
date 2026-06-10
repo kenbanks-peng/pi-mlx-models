@@ -10,7 +10,7 @@ Local MLX model launcher for [Pi](https://pi.dev) on Apple Silicon.
 
 ## What you get
 
-- Interactive preset selector via `/mlx-start`
+- Interactive cached-model selector via `/mlx-start`
 - Local runtime bootstrap via `/mlx-init` (venv + `mlx-lm`)
 - Startup progress with stage/status updates and warm-up timer
 - Provider models only appear when the server is actually ready
@@ -37,27 +37,29 @@ pi install git:github.com/vmarinogg/pi-mlx-models
 /mlx-start
 ```
 
-When `/mlx-start` is used with no args, a selector opens and you can pick a preset with arrow keys + Enter.
+When `/mlx-start` is used with no args, a selector opens and you can pick an MLX model already present in the Hugging Face cache with arrow keys + Enter.
 
 You can also start directly with a full model id:
 
 ```bash
-/mlx-start mlx-community/Qwen3-4B-Instruct-2507-4bit
+/mlx-start <hf-model-id>
 ```
 
 ## Commands
 
 - `/mlx-init` — initialize local MLX runtime
-- `/mlx-start [hf-model-id]` — open selector (no args) or start with full model id
+- `/mlx-start [hf-model-id]` — open cached-model selector (no args) or start with full model id
 - `/mlx-stop` — stop server and clear active provider models
 
-## Included presets
+## Model selection
 
-- `deepseek_r1_1_5b` — reasoning, math
-- `gemma4_e2b` — writing, summarization
-- `llama3_2_3b` — chat, rewriting
-- `qwen3_4b` — coding, reasoning
-- `smollm3_3b` — fast chat, quick drafts
+The selector is populated from:
+
+```bash
+hf cache ls --format json
+```
+
+Cached model repos that look MLX-compatible are shown (`mlx-community/*` or ids containing `mlx`). If no cached MLX models are found, start one directly by Hugging Face model id; MLX will download it into the package cache and it will appear in the selector next time.
 
 > [!TIP]
 > Want to try other models? Browse MLX Community collections on Hugging Face:  
@@ -75,20 +77,22 @@ Environment variables supported by the extension:
 - `PI_MLX_MODELS_PORT` (default: `11434`)
 - `PI_MLX_MODELS_HOST` (default: `127.0.0.1`)
 - `PI_MLX_MODELS_BASE_URL` (default: `http://<host>:<port>/v1`)
-- `PI_MLX_MODELS_DEFAULT_MODEL` (default: `mlx-community/Qwen3-4B-Instruct-2507-4bit`)
+- `PI_MLX_MODELS_DEFAULT_MODEL` (optional cached model id or generated cache key)
+- `PI_MLX_MODELS_HF_CLI` (optional path to the `hf` CLI)
+- `HF_HOME` (default: `~/.cache/huggingface`; Hugging Face stores repos under its `hub/` subdirectory)
 
 ## Local data paths
 
 Runtime artifacts are stored under:
 
 - `~/.pi/agent/pi-mlx-models/venv`
-- `~/.pi/agent/pi-mlx-models/models`
+- Hugging Face model cache: `$HF_HOME/hub` or `~/.cache/huggingface/hub` when `HF_HOME` is unset
 
 ## Development
 
 ```bash
-npm install
-npm run build
+bun install
+bun run build
 ```
 
 Pi package manifest is in `package.json`:
